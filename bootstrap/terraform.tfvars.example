@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. The two GUIDs come from
+# `az account show` (subscription_id = .id, tenant_id = .tenantId).
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+name_prefix     = "altop"
+location        = "eastus"

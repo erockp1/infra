@@ -1,0 +1,20 @@
+#cloud-config
+# Chunk 2 — DC VM first boot. Keep it minimal: set the hostname and mount the
+# data disk at /var/lib/samba. NO apt here — the VNet hands out the DC's own
+# (not-yet-running) IP as DNS, so package installs can't resolve yet. Samba +
+# its packages are installed in Chunk 3 via a custom-script extension that
+# bootstraps DNS first.
+hostname: ${hostname}
+fqdn: ${fqdn}
+preserve_hostname: false
+
+# Mount the LUN-0 data disk at /var/lib/samba. Resolve the disk via the stable
+# Azure by-lun symlink (works for both NVMe — current-gen — and SCSI VMs).
+# Idempotent: only formats if the disk has no filesystem yet.
+runcmd:
+  - set -eux
+  - DEV=$(readlink -f /dev/disk/azure/data/by-lun/0)
+  - mkdir -p /var/lib/samba
+  - if ! blkid "$DEV" >/dev/null 2>&1; then mkfs.ext4 -L sambadata "$DEV"; fi
+  - grep -q 'LABEL=sambadata' /etc/fstab || echo 'LABEL=sambadata /var/lib/samba ext4 defaults,nofail 0 2' >> /etc/fstab
+  - mount -a

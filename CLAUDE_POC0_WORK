@@ -1,0 +1,355 @@
+POC 0 Rig — Terraform Build Plan (for Claude Code)
+
+
+What this is. A build plan for a self-contained Azure rig that proves the
+POC 0 mechanism from Cloud Port: a stateless Container App performing an
+LDAPS simple bind against a domain controller across a simulated hybrid
+boundary. It is built in a personal / free-tier Azure account as portable
+Terraform, so the corporate version is later a tfvars swap.
+
+What it proves: the LDAPS-bind auth mechanism, cross-boundary DNS, the NSG
+path, and the Terraform/IaC itself.
+What it does NOT prove (separate tenant, simulated transport): corporate RBAC,
+corporate Azure Policy, and reachability to the real ALTOP-DC01 over the real
+link. Keep that line in any writeup so the green check stays honest.
+
+Audience: Claude Code. Build in the numbered chunks below, in order. Each chunk
+is independently terraform apply-able and ends in an acceptance check — do
+not start the next chunk until the current check passes. Pause for human review at
+each chunk boundary.
+
+
+
+
+Ground rules (apply to every chunk)
+
+
+Parameterize everything environment-specific — subscription ID, tenant ID,
+region, resource-group names, address spaces, tags, domain name, bind-account DN,
+base DN, name prefix. Zero hardcoded IDs or names inside modules. The corporate
+port must be a different terraform.tfvars, nothing else.
+Globally-unique names (storage account, ACR, Key Vault, any public-DNS name)
+derive from a name_prefix variable — never hardcode them.
+Remote state in an Azure Storage backend, not local terraform.tfstate.
+(Chunk 0 stands this up.)
+Pin the providers (azurerm, plus random/tls as needed) to explicit
+versions. Register resource providers explicitly — a fresh subscription has
+many unregistered (Microsoft.App, Microsoft.ContainerRegistry,
+Microsoft.OperationalInsights, Microsoft.Network, Microsoft.Compute).
+Cost discipline (free-tier budget): small B-series VMs; a budget/cost
+alert at ~$5 in Chunk 0; no VPN Gateway (peering replaces it); no Azure
+Bastion (use JIT or a locked-down jump path); deallocate the DC VM between
+sessions. Default everything to the smallest viable SKU.
+Never domain-join the Container App. The app does an LDAPS bind over a TLS
+socket — nothing more. Domain-join fights the stateless/scale-to-zero design and is
+not needed.
+Suggested layout: a root config that calls modules/network, modules/dc,
+modules/app, with scripts/ for DC bootstrap and validate/ for the bind test.
+Add one module per chunk so each chunk is a clean increment.
+
+
+
+Resource groups & naming (cross-cutting — decide up front)
+
+Resource groups — split by lifecycle, and make creation optional.
+
+
+For the rig, create three RGs mirroring the boundary you're simulating: a
+networking/shared RG (both VNets, peering, private DNS, NSGs — long-lived); an
+on-prem-sim RG (the Samba DC VM, its disk, the jump path — the one you deallocate
+/ rebuild); and a cloud-app RG (Container Apps env, ACR, Log Analytics — under
+active iteration). Splitting by lifecycle lets you destroy and rebuild the app side,
+or stop the DC side, without disturbing the wired network — and keeps cost legible per
+area.
+Names come from name_prefix (e.g. rg-<prefix>-net, -onprem, -app);
+modules receive the RG name + location, they never invent their own.
+Make RG creation a flag (e.g. create_resource_groups): each RG switches between
+azurerm_resource_group (create — your rig) and a data source (reference an existing
+one — corporate). In corporate you'll be handed RGs scoped to you with Contributor
+and usually no right to create new ones; if the Terraform hardcodes "I own the RG,"
+the corporate apply fails on the first resource. This flag is the single most
+important porting affordance.
+
+
+Naming — decide the shape now so it ports as values, not edits.
+
+
+Keep name_prefix short (a few chars). Several resources are globally unique
+across all of Azure with tight charsets: storage account (3–24, lowercase
+alphanumeric, no hyphens), ACR (5–50, alphanumeric), Key Vault (3–24,
+alphanumeric + hyphens). Derive these as ${prefix}${suffix} with a random suffix so
+re-applies and the corporate apply both get a valid, unique name.
+Derive every name from variables/locals — never hardcode — so corporate's naming
+standard (often CAF-style <type>-<workload>-<env>-<region>) is a tfvars change, not a
+sweep through modules. Expect corporate to mandate their convention via Policy;
+off-pattern names may be denied at apply.
+The realm/domain name is a naming decision with teeth. Pick a distinct test
+realm (e.g. a subdomain of a domain you own, or a clearly-test *.lab) — don't
+mirror the real corporate domain. The realm + DC hostname produce the DC FQDN,
+which is exactly what the LDAPS cert SAN must match and what the app connects by,
+and the realm drives the base DN. Keep realm, DC hostname, base DN, and
+bind-account DN all as variables — the corporate swap changes these strings and nothing
+else. (Avoid bare .local where you can; it's common in labs but invites mDNS/resolver
+quirks.)
+Tag everything from the start (owner, purpose=poc0, env, a teardown/expiry
+reminder). Corporate requires tags via Policy, and on a personal account a
+"delete-after" tag is a useful nudge against a forgotten running VM.
+
+
+
+Chunk 0 — Terraform foundation & guardrails
+
+Goal: a working Terraform skeleton with remote state, pinned providers, the
+variable surface, and a cost alarm — before any rig resources exist.
+
+Build:
+
+
+backend.tf — azurerm remote state (a storage account + container; this can be
+bootstrapped once by hand or via a tiny separate config, then referenced).
+providers.tf — azurerm pinned; features {}; explicit
+azurerm_resource_provider_registration (or document az provider register) for
+Microsoft.App, Microsoft.ContainerRegistry, Microsoft.OperationalInsights,
+Microsoft.Network, Microsoft.Compute.
+variables.tf + terraform.tfvars.example — at minimum: name_prefix,
+location, tags, subscription_id, tenant_id, the three RG names +
+create_resource_groups flag (see Resource groups & naming), plus address-space and
+realm/domain placeholders the later chunks fill in.
+A budget (azurerm_consumption_budget_subscription) with an alert at a low
+dollar threshold and your email.
+
+
+Acceptance check: terraform init succeeds against the remote backend;
+terraform plan is clean; the budget alert is visible in the portal; no rig
+resources created yet.
+
+Gotchas: the state storage account name is globally unique — derive from
+name_prefix. Provider registration can take a few minutes; let it finish before
+Chunk 1.
+
+
+Chunk 1 — Two VNets + peering + private DNS (the simulated boundary)
+
+Goal: recreate production's shape — a cloud network and an on-prem network
+joined by a link — using two VNets and peering (peering stands in for the hybrid
+VPN/ExpressRoute, since both sides are already in Azure).
+
+Build (modules/network):
+
+
+Resource group(s) — the networking/shared RG here, the on-prem-sim and
+cloud-app RGs as their resources land (per Resource groups & naming; honor the
+create_resource_groups flag — create vs. reference).
+Cloud VNet with an app subnet sized for a VNet-integrated Container Apps
+environment (Consumption-only env wants a dedicated subnet — size per the current
+Container Apps requirement, e.g. a /23; confirm the minimum at build time and
+parameterize the prefix).
+On-prem VNet with a dc subnet and a small mgmt/jump subnet.
+Non-overlapping address spaces between the two VNets (and chosen so they won't
+collide with likely corporate ranges later — parameterize).
+Bidirectional VNet peering between cloud and on-prem VNets.
+A private DNS zone for the AD domain name, linked to both VNets. (Actual
+name resolution comes online once the DC is up in Chunk 3; set the VNet DNS
+server to the DC's reserved static IP here or in Chunk 2.)
+
+
+Acceptance check: both peering links report Connected; the private DNS zone
+exists and is linked to both VNets; address spaces don't overlap.
+
+Gotchas: decide the DC's static IP now and reserve it, so the VNet DNS-server
+setting can point at it before the DC exists. Don't put anything in the app subnet yet
+if it's delegated to Container Apps — delegation can block other resources.
+
+
+Chunk 2 — The DC VM (bare) + admin access
+
+Goal: a Linux VM positioned to become a Samba-AD domain controller —
+provisioned and reachable, but not yet provisioned as a DC.
+
+Build (modules/dc, part 1):
+
+
+Linux VM (small B-series, e.g. B2s; an LTS Ubuntu/Debian image) in the
+dc subnet, with a static private IP (the one reserved in Chunk 1).
+No public IP.
+A data disk with host caching = None, mounted at /var/lib/samba —
+the directory database and SYSVOL live here, off the OS disk and well off the
+ephemeral temp disk.
+NSG on the dc subnet: deny-by-default; allow management (SSH) only from
+the jump path; the bind port (636) from the app subnet is opened in a later chunk.
+Admin access without Bastion: Azure JIT VM access, or a tiny jump VM with
+a public IP restricted by NSG to your home IP. Pick the cheaper one and parameterize
+it; default to JIT if available. Use SSH keys, not passwords.
+Set the VNet DNS server to the DC's static IP (if not already done in Chunk 1).
+
+
+Acceptance check: the VM boots; reachable over the chosen admin path via SSH; the
+data disk is mounted at /var/lib/samba with caching None; no public IP on the DC.
+
+Gotchas: keep it B-series and plan to deallocate between sessions (stopping
+halts compute billing; you keep paying only cheap disk). A Linux DC tolerates
+stop/start far better than Windows, but AD/Kerberos still cares about time —
+install chrony/ntp so the clock stays sane across restarts.
+
+
+Chunk 3 — Provision the Samba-AD domain + test identities
+
+Goal: stand up the AD domain on Samba and the identities the bind test needs. No
+promotion-reboot dance — a Linux DC provisions in a single pass.
+
+Build (scripts/dc-setup.sh via cloud-init / custom-data or a custom-script
+extension):
+
+
+Install Samba (the AD-DC packages) + chrony. Disable any stub resolver that
+occupies port 53 (e.g. systemd-resolved's listener) so Samba's internal DNS can
+bind it; point the host's own resolver at 127.0.0.1.
+Provision the domain as an AD DC:
+samba-tool domain provision --server-role=dc --use-rfc2307 --dns-backend=SAMBA_INTERNAL --realm=<REALM> --domain=<DOMAIN> (realm/domain from
+variables, e.g. CORP.EXAMPLE.LOCAL / CORP). Enable and start the samba service.
+Create an OU, two test users (known passwords from sensitive variables —
+test-only, never real), and a bind service account (samba-tool user create /
+ou create). A plain user can read userAccountControl, so the bind account needs no
+special rights.
+Confirm the samba AD DC service is serving DNS for the realm.
+
+
+Acceptance check: the domain is up (samba-tool domain info / samba-tool user list from SSH); the realm resolves from both VNets (test resolution from a probe in
+the cloud VNet); the bind service account exists.
+
+Gotchas: the port-53 / systemd-resolved conflict is the classic Samba-AD
+provisioning failure — handle it in the bootstrap script. Keep test passwords in
+sensitive variables / a git-ignored tfvars file. Provisioning is one pass, but if
+the script can't complete before the VM finishes first boot, re-run it idempotently
+rather than reprovisioning.
+
+
+Chunk 4 — LDAPS on the DC
+
+Goal: turn on LDAPS (636) with a trustworthy cert, and export the CA cert for the
+client to trust.
+
+Build (extends modules/dc / dc-setup.sh):
+
+
+A Samba AD DC serves LDAPS on 636 by default using the TLS material in
+/var/lib/samba/private/tls/ (cert.pem, key.pem, ca.pem). For the rig, issue
+your own CA + DC cert (a small tls-provider step in Terraform, or openssl) and
+point smb.conf at them: tls enabled = yes, tls keyfile, tls certfile,
+tls cafile.
+Ensure the DC cert's SAN matches the FQDN the app will connect by (the DC's realm
+FQDN). This is the single most common LDAPS failure.
+Export the CA cert (PEM) as a Terraform output / artifact for Chunk 5 to bake
+into the container's trust store.
+
+
+Acceptance check: an LDAPS bind over 636 with TLS succeeds locally —
+openssl s_client -connect <dc-fqdn>:636 shows the cert/chain, and
+ldapsearch -H ldaps://<dc-fqdn> -D <bind-dn> -w <pw> -b <base-dn> returns a user from
+the jump box; the exported CA cert is available to the next chunk. Test a
+wrong/expired cert path too so you know what failure looks like.
+
+Gotchas: the cert's SAN must match the connect FQDN and the client must trust
+the issuer — these are the two LDAPS failure modes, and they're identical against
+corporate's real DC (whose cert chains to their internal CA). Solving CA-trust once
+here is representative, not throwaway. (Samba's auto-generated self-signed cert works
+for a quick smoke test, but issue your own so you control the SAN and CA.)
+
+
+Chunk 5 — The Container App that performs the bind
+
+Goal: a stateless, non-domain-joined, scale-to-zero Container App that binds to
+the DC across the peering — the actual POC 0 proof.
+
+Build (modules/app + validate/):
+
+
+A Log Analytics workspace + a VNet-integrated Container Apps environment in
+the cloud VNet / app subnet (VNet integration is required so egress routes over the
+peering to the DC).
+ACR (or use a public base image) holding a tiny LDAP-bind test app (e.g.
+Python + ldap3): given a username/password it attempts an LDAPS simple bind and
+returns success/failure; a second endpoint does a service-account bind then reads
+userAccountControl (to show disabled/expired/locked detection — a plain bind
+validates the password but not account policy).
+The app carries the CA cert from Chunk 4 in its trust store and points its TLS
+config at it. Config via env/secrets: DC FQDN, base DN, bind-account DN.
+Scale-to-zero (min replicas 0) — it sits in the Container Apps free grant.
+Not domain-joined. No SMB, no Kerberos/NTLM machinery — just the TLS bind.
+
+
+Acceptance check (the POC 0 matrix):
+
+
+Valid user + correct password → bind succeeds.
+Valid user + wrong password → bind fails (cleanly, distinguishable).
+The app resolves the DC by name across the boundary (DNS working), not just by
+IP. (If name resolution misbehaves first time, connecting by IP isolates DNS from
+the bind; then fix DNS so the name path works — corporate will require by-name.)
+(Optional) service-account bind reads userAccountControl for a disabled test user.
+
+
+Gotchas: Container Apps respects the VNet's DNS settings when VNet-integrated;
+verify name resolution explicitly. The bind connects by the FQDN that matches the
+cert SAN — mismatches here are the usual failure. Keep the app stateless; this is the
+shape the real cloud login will take.
+
+
+Chunk 6 — Harden, validate, and document teardown
+
+Goal: tighten the boundary, run the full validation, and capture cost/teardown
+hygiene.
+
+Build / do:
+
+
+NSG hardening: app subnet → DC allowed only on 636; management/SSH locked to
+the jump path / home IP; default-deny elsewhere. This mirrors the real invariant —
+the cloud reaches in over a narrow path; on-prem initiates nothing toward the cloud.
+Run and record the validation matrix from Chunk 5.
+Write the teardown/cost note: deallocate the DC between sessions; the budget
+alert from Chunk 0 is live; nothing carries real secrets or data; the rig is empty
+infrastructure only.
+Produce a short "proven vs pending" statement for the POC 0 writeup: mechanism
+(LDAPS bind, cert trust, cross-boundary DNS, IaC) proven against a Samba-AD
+stand-in DC; pending validation against the real Windows ALTOP-DC01 and
+corporate RBAC/policy over the real link. (Samba-AD is a faithful stand-in for the
+bind itself; the Windows-AD-specific surface — cert auto-enrollment, schema/attribute
+and GPO nuances — is the slightly larger "pending" gap to keep honest.)
+
+
+Acceptance check: validation matrix passes; NSGs are least-privilege; budget alert
+confirmed; teardown steps documented.
+
+
+Porting to corporate (what changes — and what doesn't)
+
+When the rig is proven, the corporate version should be a different tfvars plus
+two structural swaps, not a rewrite:
+
+
+tfvars swaps: subscription/tenant IDs, region, RG names, address spaces, tags,
+name_prefix, domain_name, base DN, bind-account DN, and the CA trust
+(corporate's internal CA instead of your rig CA).
+Structural swaps: the peering (rig) becomes the real hybrid link
+(VPN/ExpressRoute, owned by corporate networking); your Samba-AD stand-in DC
+becomes the real Windows ALTOP-DC01 (you create no DC — you point at theirs).
+The bind code, cert-trust handling, DNS path, and NSG rules are unchanged by the
+swap.
+Declare the RBAC you need as explicit resources (role assignments, managed
+identities, Key Vault access policies) so the corporate apply surfaces exactly
+which grants are missing — treat the rig as producing a manifest of required
+permissions, since in your own account you're Owner and will never hit the wall
+corporate will put up.
+
+
+Cost summary (free-tier sanity)
+
+Free/near-free: the two VNets, peering, private DNS, NSGs, and the scale-to-zero
+Container App (monthly free grant). Real (small) cost: the DC VM — a small
+Linux B-series running Samba-AD (no Windows license, so cheaper than a Windows
+DC), deallocated between sessions. Avoid: VPN Gateway, Azure
+Bastion left running, and any second always-on VM (defer the SMB-share VM
+entirely — the cloud never touches \\mars directly, so it's not part of POC 0). The
+whole rig fits inside the $200 / 30-day window with room to spare; the day-one budget
+alert is the backstop.

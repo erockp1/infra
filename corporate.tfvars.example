@@ -1,0 +1,72 @@
+# ===========================================================================
+# Corporate port — worked example tfvars. Copy to terraform.tfvars and fill in.
+# The corporate run is THIS file + two structural swaps (see CORPORATE_PORT.md):
+#   (1) peering -> real hybrid link, (2) Samba stand-in -> real ALTOP-DC01.
+# All <PLACEHOLDER> values come from corporate (subscription, networking, AD, IT).
+# ===========================================================================
+
+# --- Identity / subscription ----------------------------------------------
+subscription_id = "<CORP_SUBSCRIPTION_ID>"
+tenant_id       = "<CORP_TENANT_ID>"
+
+# --- Naming / region / tags (expect Policy to enforce CAF-style names + tags)
+name_prefix  = "altop"          # adjust to corporate convention; drives ACR/storage names
+location     = "<CORP_REGION>"  # e.g. eastus2
+tags = {
+  # corporate Policy usually MANDATES a tag set — fill per their standard
+  costcenter = "<CC>"
+  owner      = "<TEAM>"
+  env        = "prod"
+}
+
+# --- Resource groups: REFERENCE existing (you won't have create rights) ----
+create_resource_groups = false
+rg_net_name    = "<CORP_RG_NETWORK>"  # holds/references the cloud VNet + app subnet
+rg_app_name    = "<CORP_RG_APP>"      # Container Apps env, ACR, Log Analytics
+rg_onprem_name = "<CORP_RG_UNUSED>"   # not used when deploy_dc=false (set to any RG you can read)
+
+# --- Cost guardrail (optional in corporate; they likely have their own) ----
+budget_alert_email = "<YOUR_CORP_EMAIL>"
+budget_amount      = 50
+budget_start_date  = "2026-07-01T00:00:00Z"
+
+# --- Networking: corporate-assigned address space --------------------------
+# The cloud side is what you deploy into; the on-prem side is reached over the
+# REAL hybrid link (structural swap), not the rig's peering.
+cloud_vnet_cidr = "<CORP_CLOUD_VNET_CIDR>"   # e.g. 10.20.0.0/16
+app_subnet_cidr = "<CORP_APP_SUBNET_CIDR>"   # delegated to Microsoft.App/environments
+aca_env_type    = "workload_profiles"
+# dc_subnet_cidr / mgmt_subnet_cidr / dc_static_ip / onprem_vnet_cidr are unused
+# when deploy_dc=false (the DC lives on corporate's on-prem network).
+
+# --- Domain / realm: the REAL AD, so dc_fqdn = real ALTOP-DC01 -------------
+domain_realm    = "<CORP_AD_REALM>"   # e.g. corp.altop.com  -> drives dc_fqdn + base_dn intent
+domain_netbios  = "<CORP_NETBIOS>"    # e.g. ALTOP            (only used when building a DC)
+base_dn         = "<CORP_BASE_DN>"    # e.g. DC=corp,DC=altop,DC=com
+dc_hostname     = "ALTOP-DC01"        # dc_fqdn = ALTOP-DC01.<domain_realm>
+ou_name         = "<SVC_ACCOUNT_OU>"  # OU containing the bind service account
+bind_account_cn = "<BIND_SVC_CN>"     # e.g. svc-cloud-ldap
+# NOTE: bind_account_dn is derived as CN=<cn>,OU=<ou>,<base_dn>. If the real
+# account's DN differs, add a bind_account_dn variable and override (see
+# CORPORATE_PORT.md "Known revisit items").
+
+# --- Chunk gates -----------------------------------------------------------
+deploy_dc        = false   # DO NOT build a DC — point at the real ALTOP-DC01
+deploy_app       = true
+app_image_pushed = true    # after pushing the image to the CORPORATE ACR
+app_image_tag    = "1"
+acr_sku          = "Standard"  # corporate may require Standard/Premium (Private Link)
+
+# --- Jump / SSH: not needed when deploy_dc=false ---------------------------
+# ssh_public_key / home_ip_cidr are only used by the rig's DC/jump build.
+# enable_jit is a seam if corporate licenses Defender for Servers.
+
+# ===========================================================================
+# SECRETS — NOT here in corporate. The rig put test-only secrets in tfvars;
+# corporate sources them from Key Vault (structural swap in modules/app):
+#   - bind service-account password -> azurerm_key_vault_secret, referenced by
+#     the container app secret via key_vault_secret_id + the app managed identity.
+#   - CA trust -> corporate internal CA (baked at build or mounted from Key Vault),
+#     NOT the rig's self-signed CA.
+# Do NOT set bind_account_password / domain_admin_password / test_users here.
+# ===========================================================================

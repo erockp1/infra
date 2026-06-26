@@ -1,0 +1,138 @@
+#!/bin/bash
+# ===========================================================================
+# Chunk 3 — provision the DC as a Samba-AD domain controller, idempotently.
+# Runs via an Azure CustomScript extension (script delivered in protected
+# settings, so the embedded passwords stay encrypted). Re-runs are safe.
+#
+# Templating note: the Terraform template engine consumes dollar-brace and
+# percent-brace tokens. All BASH variables below use the $NAME form (no braces)
+# so the template engine leaves them alone.
+# ===========================================================================
+set -euxo pipefail
+exec > >(tee -a /var/log/dc-setup.log) 2>&1
+echo "=== dc-setup starting $(date -u) ==="
+
+REALM="${realm_upper}"
+REALM_LOWER="${realm_lower}"
+DOMAIN="${domain_netbios}"
+DC_IP="${dc_ip}"
+DNS_FWD="${dns_forwarder}"
+BASE_DN="${base_dn}"
+OU="${ou_name}"
+ADMIN_PW='${admin_password}'
+BIND_CN="${bind_cn}"
+BIND_PW='${bind_password}'
+
+export DEBIAN_FRONTEND=noninteractive
+
+# --- 1. Free port 53 and give the host a working resolver for apt ----------
+# systemd-resolved squats on 127.0.0.53:53 — Samba's internal DNS needs 53.
+systemctl disable --now systemd-resolved || true
+rm -f /etc/resolv.conf
+printf 'nameserver %s\nsearch %s\n' "$DNS_FWD" "$REALM_LOWER" > /etc/resolv.conf
+
+# --- 2. Packages (preseed krb5 realm so install is non-interactive) --------
+# NOTE: samba-dsdb-modules + samba-vfs-modules are REQUIRED for AD-DC provision
+# (they carry the ldb modules such as samba_secrets). They are only *recommended*
+# deps of samba, so --no-install-recommends silently drops them -> provision
+# fails with "Module [samba_secrets] not found". Install them explicitly.
+echo "krb5-config krb5-config/default_realm string $REALM" | debconf-set-selections
+apt-get update -y
+apt-get install -y \
+  samba smbclient winbind libnss-winbind libpam-winbind \
+  samba-dsdb-modules samba-vfs-modules \
+  krb5-user chrony ldap-utils dnsutils acl attr
+
+# --- 3. Time sync (Kerberos is clock-sensitive) ----------------------------
+systemctl enable --now chrony 2>/dev/null || systemctl enable --now chronyd 2>/dev/null || true
+
+# --- 4. Provision the AD domain (single pass; idempotent guard) ------------
+if [ ! -f /var/lib/samba/private/sam.ldb ]; then
+  systemctl stop smbd nmbd winbind 2>/dev/null || true
+  systemctl disable smbd nmbd winbind 2>/dev/null || true
+  mv -f /etc/samba/smb.conf /etc/samba/smb.conf.orig 2>/dev/null || true
+  # Clean any partial state from a previous failed provision so this is a clean pass.
+  rm -rf /var/lib/samba/private/* /var/lib/samba/sysvol/* 2>/dev/null || true
+  samba-tool domain provision \
+    --server-role=dc \
+    --use-rfc2307 \
+    --dns-backend=SAMBA_INTERNAL \
+    --realm="$REALM" \
+    --domain="$DOMAIN" \
+    --adminpass="$ADMIN_PW" \
+    --host-ip="$DC_IP" \
+    --option="dns forwarder = $DNS_FWD"
+  cp -f /var/lib/samba/private/krb5.conf /etc/krb5.conf
+else
+  echo "Domain already provisioned; skipping provision."
+fi
+
+# --- 5. Run the AD DC service; mask the conflicting standalone units -------
+systemctl unmask samba-ad-dc 2>/dev/null || true
+systemctl disable --now smbd nmbd winbind 2>/dev/null || true
+systemctl mask smbd nmbd winbind 2>/dev/null || true
+systemctl enable --now samba-ad-dc
+
+# --- 6. Point the host resolver at Samba (which forwards externally) -------
+rm -f /etc/resolv.conf
+printf 'nameserver 127.0.0.1\nsearch %s\n' "$REALM_LOWER" > /etc/resolv.conf
+
+# Wait for the directory to answer before creating identities.
+for i in $(seq 1 18); do
+  if samba-tool domain info 127.0.0.1 >/dev/null 2>&1; then break; fi
+  sleep 5
+done
+
+# --- 7. OU + identities (idempotent; TEST-ONLY credentials) ----------------
+samba-tool ou create "OU=$OU,$BASE_DN" 2>/dev/null || echo "OU $OU already exists"
+
+create_user() {
+  local u="$1"; local p="$2"
+  if samba-tool user show "$u" >/dev/null 2>&1; then
+    echo "user $u already exists"
+  else
+    samba-tool user create "$u" "$p" --userou="OU=$OU"
+  fi
+}
+
+create_user "$BIND_CN" "$BIND_PW"
+%{ for username, u in test_users ~}
+create_user "${username}" '${u.password}'
+%{ endfor ~}
+
+# --- 8. LDAPS (636): install our own CA + DC cert; point smb.conf at them --
+# Samba serves LDAPS on 636 using the TLS material in private/tls/. Replace the
+# auto-generated self-signed cert with our CA-signed one (controlled SAN/CA).
+TLSDIR=/var/lib/samba/private/tls
+mkdir -p "$TLSDIR"
+
+cat > "$TLSDIR/ca.pem" <<'CA_PEM_EOF'
+${ca_cert_pem}
+CA_PEM_EOF
+
+cat > "$TLSDIR/cert.pem" <<'CERT_PEM_EOF'
+${dc_cert_pem}
+CERT_PEM_EOF
+
+(umask 077; cat > "$TLSDIR/key.pem" <<'KEY_PEM_EOF'
+${dc_key_pem}
+KEY_PEM_EOF
+)
+chown root:root "$TLSDIR"/*.pem
+chmod 644 "$TLSDIR/ca.pem" "$TLSDIR/cert.pem"
+chmod 600 "$TLSDIR/key.pem"
+
+# Point smb.conf at our TLS files (idempotent — only insert once).
+SMBCONF=/etc/samba/smb.conf
+if ! grep -q "tls enabled" "$SMBCONF"; then
+  sed -i "/^\[global\]/a \\\ttls enabled = yes\n\ttls keyfile = $TLSDIR/key.pem\n\ttls certfile = $TLSDIR/cert.pem\n\ttls cafile = $TLSDIR/ca.pem" "$SMBCONF"
+fi
+testparm -s >/dev/null 2>&1 || true
+systemctl restart samba-ad-dc
+sleep 5
+
+echo "=== dc-setup complete $(date -u) ==="
+samba-tool domain info 127.0.0.1 || true
+samba-tool user list || true
+echo "=== LDAPS cert in use (SAN check) ==="
+echo | openssl s_client -connect ${dc_fqdn}:636 -servername ${dc_fqdn} 2>/dev/null | openssl x509 -noout -subject -issuer -ext subjectAltName 2>/dev/null || true

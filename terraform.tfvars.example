@@ -1,0 +1,54 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. The corporate port is a
+# different copy of THIS file — not an edit inside any module.
+
+# --- Required (no safe default) --------------------------------------------
+subscription_id = "00000000-0000-0000-0000-000000000000" # az account show .id
+tenant_id       = "00000000-0000-0000-0000-000000000000" # az account show .tenantId
+
+# --- Naming / region / tags ------------------------------------------------
+name_prefix  = "altop"
+location     = "eastus"
+delete_after = "2026-07-31"
+# tags = { costcenter = "poc" }
+
+# --- Cost guardrail --------------------------------------------------------
+budget_alert_email = "erockp1@gmail.com"
+budget_amount      = 5
+budget_start_date  = "2026-06-01T00:00:00Z" # first of the current month
+
+# --- Resource groups -------------------------------------------------------
+create_resource_groups = true # corporate: false + supply existing rg_*_name
+
+# --- Networking (defaults are fine for the rig) ----------------------------
+cloud_vnet_cidr  = "10.50.0.0/16"
+onprem_vnet_cidr = "10.60.0.0/16"
+app_subnet_cidr  = "10.50.0.0/27" # workload-profiles env minimum; /23 if consumption_only
+dc_subnet_cidr   = "10.60.1.0/24"
+mgmt_subnet_cidr = "10.60.2.0/24"
+dc_static_ip     = "10.60.1.10"
+aca_env_type     = "workload_profiles"
+
+# --- Domain / realm --------------------------------------------------------
+domain_realm   = "poc0.lab"
+domain_netbios = "POC0"
+base_dn        = "DC=poc0,DC=lab"
+dc_hostname    = "dc01"
+ou_name        = "POC0"
+bind_account_cn = "svc-bind"
+
+# --- DC / jump admin access (needed from Chunk 2) --------------------------
+# ssh_public_key = "ssh-ed25519 AAAA..."   # I can generate a keypair for you
+# home_ip_cidr   = "203.0.113.7/32"        # I can detect your public IP
+
+# --- Chunk gates (flip on as you advance, one chunk at a time) -------------
+deploy_dc  = false
+deploy_app = false
+
+# ===========================================================================
+# SENSITIVE — put these ONLY in a git-ignored terraform.tfvars (TEST creds, never real):
+# bind_account_password = "REPLACE-with-a-throwaway-password"
+# test_users = {
+#   alice = { password = "REPLACE-throwaway" }
+#   bob   = { password = "REPLACE-throwaway" }
+# }
+# ===========================================================================

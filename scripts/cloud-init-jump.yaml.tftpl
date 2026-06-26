@@ -1,0 +1,6 @@
+#cloud-config
+# Chunk 2 — jump VM first boot. Minimal: just the hostname. SSH (key auth) is
+# configured by the VM resource. Admin tooling (ldap-utils, openssl) is added in
+# Chunk 4 once the DC serves DNS+forwarder so apt can resolve over the VNet.
+hostname: ${hostname}
+preserve_hostname: false

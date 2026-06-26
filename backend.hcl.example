@@ -1,0 +1,7 @@
+# Generated from the bootstrap output. Do NOT commit the real backend.hcl.
+#   terraform -chdir=bootstrap output -raw backend_hcl > backend.hcl
+resource_group_name  = "rg-altop-tfstate"
+storage_account_name = "altoptfxxxxxx"
+container_name       = "tfstate"
+key                  = "poc0.tfstate"
+use_azuread_auth     = true
