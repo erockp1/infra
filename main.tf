@@ -140,6 +140,23 @@ module "quicksignals" {
   image_pushed      = var.quicksignals_image_pushed
   django_secret_key = var.quicksignals_django_secret_key
 
+  # Duality (Phase B): point the cloud LDAPS branch at the Samba DC. These derive
+  # from the same realm/DC vars the DC module uses, so the corporate port swaps
+  # them via tfvars (real ALTOP-DC01) without touching this block. AUTH_STUB_*
+  # is gated on a rig-only flag so it can never leak into a corporate deploy.
+  extra_env = merge({
+    LDAP_HOST              = local.dc_fqdn
+    LDAP_PORT              = "636"
+    LDAP_USE_SSL           = "true"
+    LDAP_AUTH_METHOD       = "SIMPLE"
+    LDAP_BASE_DN           = var.base_dn
+    LDAP_REALM             = var.domain_realm
+    LDAP_BIND_USER         = local.bind_account_dn
+    LDAP_USER_SEARCH_BASES = "OU=${var.ou_name},${var.base_dn}"
+    LDAP_ALLOWED_DOMAINS   = var.domain_realm
+  }, var.quicksignals_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {})
+  ldap_bind_password = var.bind_account_password
+
   # Warm replica for an interactive dashboard; set 0 to scale-to-zero for the rig budget.
   min_replicas = 1
 

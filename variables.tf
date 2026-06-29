@@ -328,3 +328,9 @@ variable "quicksignals_django_secret_key" {
   sensitive   = true
   default     = null
 }
+
+variable "quicksignals_stub_permissions" {
+  type        = bool
+  description = "RIG-ONLY: set AUTH_STUB_PERMISSIONS=true so Phase B proves bind+duality+JWT without the AltopPermissions DB. MUST stay false for corporate."
+  default     = false
+}

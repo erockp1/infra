@@ -56,6 +56,19 @@ variable "django_secret_key" {
   sensitive   = true
 }
 
+variable "extra_env" {
+  type        = map(string)
+  description = "Additional plain (non-secret) env vars for the container — e.g. the LDAP_* duality config and the rig-only AUTH_STUB_PERMISSIONS."
+  default     = {}
+}
+
+variable "ldap_bind_password" {
+  type        = string
+  description = "LDAP service/bind account password, injected as the secret env LDAP_BIND_PASSWORD. Null = omit (on-prem images bind by other means)."
+  sensitive   = true
+  default     = null
+}
+
 variable "cpu" {
   type        = number
   description = "vCPU (Consumption ratio-locks ~2GiB/vCPU on a 0.25 grid)."

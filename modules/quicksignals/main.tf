@@ -56,6 +56,16 @@ resource "azurerm_container_app" "quicksignals" {
     value = var.django_secret_key
   }
 
+  # LDAP service/bind password (rig: the Samba svc-bind). Inline TEST-ONLY secret,
+  # same pattern as django-secret-key; moves to Key Vault later. Omitted if unset.
+  dynamic "secret" {
+    for_each = var.ldap_bind_password == null ? [] : [1]
+    content {
+      name  = "ldap-bind-password"
+      value = var.ldap_bind_password
+    }
+  }
+
   ingress {
     external_enabled = true
     target_port      = 8000 # Django/gunicorn (the binder was 8080)
@@ -93,6 +103,25 @@ resource "azurerm_container_app" "quicksignals" {
       env {
         name        = "DJANGO_SECRET_KEY"
         secret_name = "django-secret-key"
+      }
+
+      # Duality + stub config (LDAP_* selecting the cloud LDAPS/Samba branch, and
+      # the rig-only AUTH_STUB_PERMISSIONS). Plain env from the caller's map.
+      dynamic "env" {
+        for_each = var.extra_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      # LDAP bind password as a secret env (only when provided).
+      dynamic "env" {
+        for_each = var.ldap_bind_password == null ? [] : [1]
+        content {
+          name        = "LDAP_BIND_PASSWORD"
+          secret_name = "ldap-bind-password"
+        }
       }
 
       # Platform health on the unauthenticated /healthz route (FDID-exempt, no DB
