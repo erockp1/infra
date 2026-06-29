@@ -24,3 +24,7 @@ id_rsa*
 bootstrap/.terraform/
 bootstrap/*.tfstate
 bootstrap/*.tfstate.*
+
+# Saved plans can contain sensitive variable values — never commit.
+tfplan
+*.tfplan

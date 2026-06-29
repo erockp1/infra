@@ -118,3 +118,30 @@ module "app" {
     azurerm_resource_provider_registration.operationalinsights,
   ]
 }
+
+# Chunk 6 — QuickSignals (POC 1), the first cloud-native app. Reuses the Chunk-5
+# substrate (Container Apps env + ACR) but brings its OWN identity. Gated by
+# deploy_quicksignals; requires deploy_app=true (it consumes module.app[0]).
+module "quicksignals" {
+  source = "./modules/quicksignals"
+  count  = var.deploy_quicksignals ? 1 : 0
+
+  name_prefix = var.name_prefix
+  location    = var.location
+  tags        = local.tags
+
+  resource_group_name          = module.app[0].rg_app_name
+  container_app_environment_id = module.app[0].environment_id
+  environment_default_domain   = module.app[0].environment_default_domain
+  acr_login_server             = module.app[0].acr_login_server
+  acr_id                       = module.app[0].acr_id
+
+  image_tag         = var.quicksignals_image_tag
+  image_pushed      = var.quicksignals_image_pushed
+  django_secret_key = var.quicksignals_django_secret_key
+
+  # Warm replica for an interactive dashboard; set 0 to scale-to-zero for the rig budget.
+  min_replicas = 1
+
+  depends_on = [module.app]
+}

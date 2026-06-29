@@ -302,3 +302,29 @@ variable "deploy_app" {
   description = "Gate Chunk 5 (Container Apps env + bind app)."
   default     = false
 }
+
+# --- QuickSignals app (Chunk 6) — requires deploy_app=true -------------------
+variable "deploy_quicksignals" {
+  type        = bool
+  description = "Gate Chunk 6 (QuickSignals container app + its own identity). Needs deploy_app=true."
+  default     = false
+}
+
+variable "quicksignals_image_pushed" {
+  type        = bool
+  description = "Two-phase gate: create the QuickSignals app only after its image is pushed to ACR."
+  default     = false
+}
+
+variable "quicksignals_image_tag" {
+  type        = string
+  description = "Tag of the quicksignals image in ACR (first apply only; CI owns it after via ignore_changes)."
+  default     = "1"
+}
+
+variable "quicksignals_django_secret_key" {
+  type        = string
+  description = "DJANGO_SECRET_KEY for QuickSignals (TEST-ONLY inline secret; keep in git-ignored tfvars only)."
+  sensitive   = true
+  default     = null
+}

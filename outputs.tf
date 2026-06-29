@@ -76,3 +76,13 @@ output "app" {
     app_url          = module.app[0].app_url
   } : null
 }
+
+# --- Chunk 6: QuickSignals -------------------------------------------------
+output "quicksignals" {
+  description = "QuickSignals app details (null until deploy_quicksignals; fqdn null until image_pushed)."
+  value = var.deploy_quicksignals ? {
+    identity_principal_id = module.quicksignals[0].identity_principal_id
+    fqdn                  = module.quicksignals[0].fqdn
+    url                   = module.quicksignals[0].url
+  } : null
+}

@@ -10,6 +10,11 @@ output "acr_name" {
   value = azurerm_container_registry.acr.name
 }
 
+output "acr_id" {
+  description = "ACR resource ID — the scope a per-app AcrPull grant (e.g. QuickSignals, Chunk 6) targets."
+  value       = azurerm_container_registry.acr.id
+}
+
 output "image_ref" {
   value = local.image_ref
 }
