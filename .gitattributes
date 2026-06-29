@@ -1,0 +1,20 @@
+# Normalize all text files to LF in the repo and on checkout (all platforms).
+# Critical for Terraform: cloud-init/templates are rendered into resource
+# attributes (custom_data, VM extension scripts) via templatefile()+base64encode.
+# A CRLF checkout on Windows changes those bytes and forces spurious VM
+# replacement. Pin everything to LF so state stays consistent across machines.
+* text=auto eol=lf
+
+# Files that MUST stay LF — embedded into Azure resources at apply time.
+*.tftpl   text eol=lf
+*.sh      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.tf      text eol=lf
+*.py      text eol=lf
+
+# Binary — never touch.
+*.docx    binary
+*.png     binary
+*.jpg     binary
+*.pem     binary
