@@ -141,24 +141,11 @@ module "quicksignals" {
   image_pushed      = var.quicksignals_image_pushed
   django_secret_key = var.quicksignals_django_secret_key
 
-  # Duality (Phase B): point the cloud LDAPS branch at the Samba DC. These derive
-  # from the same realm/DC vars the DC module uses, so the corporate port swaps
-  # them via tfvars (real ALTOP-DC01) without touching this block. AUTH_STUB_*
-  # is gated on a rig-only flag so it can never leak into a corporate deploy.
-  extra_env = merge({
-    LDAP_HOST              = local.dc_fqdn
-    LDAP_PORT              = "636"
-    LDAP_USE_SSL           = "true"
-    LDAP_AUTH_METHOD       = "SIMPLE"
-    LDAP_BASE_DN           = var.base_dn
-    LDAP_REALM             = var.domain_realm
-    LDAP_BIND_USER         = local.bind_account_dn
-    LDAP_USER_SEARCH_BASES = "OU=${var.ou_name},${var.base_dn}"
-    LDAP_ALLOWED_DOMAINS   = var.domain_realm
-    },
+  # Duality (Phase B): the shared LDAP config (local.ldap_extra_env) + this app's
+  # rig-only stub flag + its two-phase Front Door ID (origin lock).
+  extra_env = merge(
+    local.ldap_extra_env,
     var.quicksignals_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {},
-    # Origin lock (Phase C): set once Front Door exists (two-phase). When present,
-    # the middleware 403s any request to the ACA FQDN lacking the matching FDID.
     var.quicksignals_front_door_id != "" ? { FRONT_DOOR_ID = var.quicksignals_front_door_id } : {},
   )
   ldap_bind_password = var.bind_account_password
@@ -186,4 +173,38 @@ module "frontdoor" {
   aca_fqdn     = module.quicksignals[0].app_fqdn
 
   depends_on = [module.quicksignals]
+}
+
+# Chunk 8 — BalDayDashboard (POC 1, Phase D). The second cloud-native app; same
+# module shape as QuickSignals (Chunk 6), reusing the shared LDAP config. Gated
+# by deploy_baldaydashboard; requires deploy_app=true.
+module "baldaydashboard" {
+  source = "./modules/baldaydashboard"
+  count  = var.deploy_baldaydashboard ? 1 : 0
+
+  name_prefix = var.name_prefix
+  location    = var.location
+  tags        = local.tags
+
+  resource_group_name          = module.app[0].rg_app_name
+  container_app_environment_id = module.app[0].environment_id
+  environment_default_domain   = module.app[0].environment_default_domain
+  acr_login_server             = module.app[0].acr_login_server
+  acr_id                       = module.app[0].acr_id
+  unique_suffix                = random_string.suffix.result
+
+  image_tag         = var.baldaydashboard_image_tag
+  image_pushed      = var.baldaydashboard_image_pushed
+  django_secret_key = var.baldaydashboard_django_secret_key
+
+  extra_env = merge(
+    local.ldap_extra_env,
+    var.baldaydashboard_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {},
+    var.baldaydashboard_front_door_id != "" ? { FRONT_DOOR_ID = var.baldaydashboard_front_door_id } : {},
+  )
+  ldap_bind_password = var.bind_account_password
+
+  min_replicas = 1
+
+  depends_on = [module.app]
 }

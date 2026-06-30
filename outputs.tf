@@ -89,6 +89,18 @@ output "quicksignals" {
   } : null
 }
 
+# --- Chunk 8: BalDayDashboard ----------------------------------------------
+output "baldaydashboard" {
+  description = "BalDayDashboard app details (null until deploy_baldaydashboard; fqdn null until image_pushed)."
+  value = var.deploy_baldaydashboard ? {
+    identity_principal_id = module.baldaydashboard[0].identity_principal_id
+    fqdn                  = module.baldaydashboard[0].fqdn
+    url                   = module.baldaydashboard[0].url
+    spa_web_host          = module.baldaydashboard[0].spa_web_host
+    spa_storage_account   = module.baldaydashboard[0].spa_storage_account_name
+  } : null
+}
+
 # --- Chunk 7: Front Door ---------------------------------------------------
 output "frontdoor" {
   description = "Front Door endpoint + FDID (null until deploy_frontdoor). Feed front_door_id into quicksignals_front_door_id and re-apply to arm the origin lock."

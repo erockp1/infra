@@ -347,3 +347,41 @@ variable "quicksignals_front_door_id" {
   description = "Front Door resource_guid -> the app's FRONT_DOOR_ID (origin lock). Two-phase: empty on the FD-creating apply, then set to module.frontdoor's front_door_id output and re-apply."
   default     = ""
 }
+
+# --- BalDayDashboard app (Chunk 8, Phase D) — requires deploy_app=true --------
+variable "deploy_baldaydashboard" {
+  type        = bool
+  description = "Gate Chunk 8 (BalDayDashboard container app + its own identity). Needs deploy_app=true."
+  default     = false
+}
+
+variable "baldaydashboard_image_pushed" {
+  type        = bool
+  description = "Two-phase gate: create the BalDayDashboard app only after its image is pushed to ACR."
+  default     = false
+}
+
+variable "baldaydashboard_image_tag" {
+  type        = string
+  description = "Tag of the baldaydashboard image in ACR (first apply only; CI owns it after via ignore_changes)."
+  default     = "1"
+}
+
+variable "baldaydashboard_django_secret_key" {
+  type        = string
+  description = "DJANGO_SECRET_KEY for BalDayDashboard (TEST-ONLY inline secret; git-ignored tfvars only)."
+  sensitive   = true
+  default     = null
+}
+
+variable "baldaydashboard_stub_permissions" {
+  type        = bool
+  description = "RIG-ONLY: AUTH_STUB_PERMISSIONS=true for BalDayDashboard (GATE B without the AltopPermissions DB). MUST stay false for corporate."
+  default     = false
+}
+
+variable "baldaydashboard_front_door_id" {
+  type        = string
+  description = "Front Door resource_guid -> BalDayDashboard's FRONT_DOOR_ID (origin lock). Two-phase, like quicksignals_front_door_id."
+  default     = ""
+}
