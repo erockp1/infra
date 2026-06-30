@@ -172,10 +172,22 @@ module "frontdoor" {
   tags                = local.tags
   resource_group_name = module.app[0].rg_app_name
 
-  spa_web_host = module.quicksignals[0].spa_web_host
-  aca_fqdn     = module.quicksignals[0].app_fqdn
+  # One endpoint per app, each with its own SPA origin (/*) and API origin
+  # (the app's route prefixes). Both apps share the profile + WAF + FDID.
+  apps = {
+    quicksignals = {
+      spa_web_host       = module.quicksignals[0].spa_web_host
+      aca_fqdn           = module.quicksignals[0].app_fqdn
+      api_route_patterns = ["/login/*", "/quicksignal/*", "/healthz", "/static/*", "/admin/*"]
+    }
+    baldaydashboard = {
+      spa_web_host       = module.baldaydashboard[0].spa_web_host
+      aca_fqdn           = module.baldaydashboard[0].app_fqdn
+      api_route_patterns = ["/login/*", "/balday/*", "/healthz", "/static/*", "/admin/*"]
+    }
+  }
 
-  depends_on = [module.quicksignals]
+  depends_on = [module.quicksignals, module.baldaydashboard]
 }
 
 # Chunk 8 — BalDayDashboard (POC 1, Phase D). The second cloud-native app; same

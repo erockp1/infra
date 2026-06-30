@@ -13,20 +13,13 @@ variable "resource_group_name" {
   description = "RG for the Front Door profile + WAF (the shared app RG)."
 }
 
-variable "spa_web_host" {
-  type        = string
-  description = "Static-website host of the SPA storage ($web) — the default (/*) origin."
-}
-
-variable "aca_fqdn" {
-  type        = string
-  description = "ACA ingress FQDN — the API origin (the /login|/quicksignal|... routes)."
-}
-
-variable "api_route_patterns" {
-  type        = list(string)
-  description = "Path patterns routed to the ACA (API) origin; everything else (/*) goes to the SPA."
-  default     = ["/login/*", "/quicksignal/*", "/healthz", "/static/*", "/admin/*"]
+variable "apps" {
+  type = map(object({
+    spa_web_host       = string       # static-website host ($web) -> the /* (SPA) origin
+    aca_fqdn           = string       # ACA ingress FQDN -> the API origin
+    api_route_patterns = list(string) # paths routed to the API origin (everything else -> SPA)
+  }))
+  description = "Per-app edge config, keyed by app name. Each app gets its OWN Front Door endpoint (hostname) under the shared profile + WAF."
 }
 
 variable "waf_block_sentinel" {

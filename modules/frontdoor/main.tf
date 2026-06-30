@@ -1,11 +1,13 @@
 # ===========================================================================
-# Chunk 7 — Front Door (POC 1, Phase C). The single public front door:
-#   /*                       -> SPA static-website origin (Blob $web)
-#   /login|/quicksignal|...  -> ACA (the Django API), same-origin to the SPA
+# Chunk 7 — Front Door (POC 1, Phase C). The single public front door, now
+# MULTI-APP: a shared profile + WAF, and one endpoint (hostname) PER app via
+# for_each over var.apps. Per app:
+#   /*                       -> that app's SPA static-website origin (Blob $web)
+#   /login|/<app-prefix>|... -> that app's ACA (the Django API), same-origin
 # Standard tier + one CUSTOM WAF rule (managed rulesets + Private Link are
-# corporate-deferred). Secures the FD->ACA hop with the X-Azure-FDID header
-# (the profile's resource_guid), enforced by app middleware. terraform destroy
-# this between sessions — Front Door has a base fee and no scale-to-zero.
+# corporate-deferred). The FD->ACA hop is secured by the X-Azure-FDID header
+# (the profile resource_guid), enforced by app middleware. terraform destroy
+# between sessions — Front Door has a base fee and no scale-to-zero.
 # ===========================================================================
 
 resource "azurerm_cdn_frontdoor_profile" "this" {
@@ -15,15 +17,18 @@ resource "azurerm_cdn_frontdoor_profile" "this" {
   tags                = var.tags
 }
 
+# --- One endpoint per app ----------------------------------------------------
 resource "azurerm_cdn_frontdoor_endpoint" "this" {
-  name                     = "ep-${var.name_prefix}-qs"
+  for_each                 = var.apps
+  name                     = "ep-${var.name_prefix}-${each.key}"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.this.id
   tags                     = var.tags
 }
 
-# --- Origin groups + origins ------------------------------------------------
+# --- SPA origin group + origin (per app) ------------------------------------
 resource "azurerm_cdn_frontdoor_origin_group" "spa" {
-  name                     = "og-spa"
+  for_each                 = var.apps
+  name                     = "og-spa-${each.key}"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.this.id
 
   load_balancing {
@@ -40,11 +45,12 @@ resource "azurerm_cdn_frontdoor_origin_group" "spa" {
 }
 
 resource "azurerm_cdn_frontdoor_origin" "spa" {
-  name                           = "origin-spa"
-  cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.spa.id
+  for_each                       = var.apps
+  name                           = "origin-spa-${each.key}"
+  cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.spa[each.key].id
   enabled                        = true
-  host_name                      = var.spa_web_host
-  origin_host_header             = var.spa_web_host
+  host_name                      = each.value.spa_web_host
+  origin_host_header             = each.value.spa_web_host
   http_port                      = 80
   https_port                     = 443
   priority                       = 1
@@ -52,8 +58,10 @@ resource "azurerm_cdn_frontdoor_origin" "spa" {
   certificate_name_check_enabled = true
 }
 
+# --- ACA (API) origin group + origin (per app) ------------------------------
 resource "azurerm_cdn_frontdoor_origin_group" "aca" {
-  name                     = "og-aca"
+  for_each                 = var.apps
+  name                     = "og-aca-${each.key}"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.this.id
 
   load_balancing {
@@ -71,11 +79,12 @@ resource "azurerm_cdn_frontdoor_origin_group" "aca" {
 }
 
 resource "azurerm_cdn_frontdoor_origin" "aca" {
-  name                           = "origin-aca"
-  cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.aca.id
+  for_each                       = var.apps
+  name                           = "origin-aca-${each.key}"
+  cdn_frontdoor_origin_group_id  = azurerm_cdn_frontdoor_origin_group.aca[each.key].id
   enabled                        = true
-  host_name                      = var.aca_fqdn
-  origin_host_header             = var.aca_fqdn
+  host_name                      = each.value.aca_fqdn
+  origin_host_header             = each.value.aca_fqdn
   http_port                      = 80
   https_port                     = 443
   priority                       = 1
@@ -83,26 +92,27 @@ resource "azurerm_cdn_frontdoor_origin" "aca" {
   certificate_name_check_enabled = true
 }
 
-# --- Routes -----------------------------------------------------------------
-# API route first (more specific patterns); the SPA route catches everything else.
+# --- Routes (per app): API patterns to ACA, everything else to the SPA ------
 resource "azurerm_cdn_frontdoor_route" "aca" {
-  name                          = "route-aca"
-  cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.this.id
-  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.aca.id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.aca.id]
+  for_each                      = var.apps
+  name                          = "route-aca-${each.key}"
+  cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.this[each.key].id
+  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.aca[each.key].id
+  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.aca[each.key].id]
 
   supported_protocols    = ["Http", "Https"]
-  patterns_to_match      = var.api_route_patterns
+  patterns_to_match      = each.value.api_route_patterns
   forwarding_protocol    = "HttpsOnly"
   https_redirect_enabled = true
   link_to_default_domain = true
 }
 
 resource "azurerm_cdn_frontdoor_route" "spa" {
-  name                          = "route-spa"
-  cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.this.id
-  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.spa.id
-  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.spa.id]
+  for_each                      = var.apps
+  name                          = "route-spa-${each.key}"
+  cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.this[each.key].id
+  cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.spa[each.key].id
+  cdn_frontdoor_origin_ids      = [azurerm_cdn_frontdoor_origin.spa[each.key].id]
 
   supported_protocols    = ["Http", "Https"]
   patterns_to_match      = ["/*"]
@@ -111,9 +121,9 @@ resource "azurerm_cdn_frontdoor_route" "spa" {
   link_to_default_domain = true
 }
 
-# --- WAF: one custom rule, to prove 'WAF in the path' -----------------------
+# --- WAF: one shared custom rule, to prove 'WAF in the path' -----------------
 resource "azurerm_cdn_frontdoor_firewall_policy" "this" {
-  name                = "waf${var.name_prefix}qs"
+  name                = "waf${var.name_prefix}poc"
   resource_group_name = var.resource_group_name
   sku_name            = "Standard_AzureFrontDoor"
   enabled             = true
@@ -135,8 +145,11 @@ resource "azurerm_cdn_frontdoor_firewall_policy" "this" {
   }
 }
 
+# Associate the WAF with EVERY app endpoint via ONE security policy (a WAF policy
+# can be attached to a profile only once; a single association carries all the
+# endpoint domains).
 resource "azurerm_cdn_frontdoor_security_policy" "this" {
-  name                     = "secpol-${var.name_prefix}-qs"
+  name                     = "secpol-${var.name_prefix}-poc"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.this.id
 
   security_policies {
@@ -144,8 +157,11 @@ resource "azurerm_cdn_frontdoor_security_policy" "this" {
       cdn_frontdoor_firewall_policy_id = azurerm_cdn_frontdoor_firewall_policy.this.id
       association {
         patterns_to_match = ["/*"]
-        domain {
-          cdn_frontdoor_domain_id = azurerm_cdn_frontdoor_endpoint.this.id
+        dynamic "domain" {
+          for_each = azurerm_cdn_frontdoor_endpoint.this
+          content {
+            cdn_frontdoor_domain_id = domain.value.id
+          }
         }
       }
     }

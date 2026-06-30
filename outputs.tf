@@ -103,9 +103,9 @@ output "baldaydashboard" {
 
 # --- Chunk 7: Front Door ---------------------------------------------------
 output "frontdoor" {
-  description = "Front Door endpoint + FDID (null until deploy_frontdoor). Feed front_door_id into quicksignals_front_door_id and re-apply to arm the origin lock."
+  description = "Front Door per-app endpoints + FDID (null until deploy_frontdoor). Feed front_door_id into <app>_front_door_id and re-apply to arm the origin lock."
   value = var.deploy_frontdoor ? {
-    endpoint_url  = module.frontdoor[0].endpoint_url
     front_door_id = module.frontdoor[0].front_door_id
+    endpoints     = module.frontdoor[0].endpoint_urls
   } : null
 }
