@@ -14,6 +14,28 @@ locals {
   app_fqdn = "${local.app_name}.${var.environment_default_domain}"
 }
 
+# --- SPA static website (Phase C) -------------------------------------------
+# The QuickSignals SPA is served from Blob static-website hosting (the $web
+# container), fronted by Front Door. error_404_document = index.html gives the
+# client-side router its deep-link fallback. This is the per-app origin; Front
+# Door (the shared edge module) routes /* here and /login|/quicksignal|... to ACA.
+resource "azurerm_storage_account" "spa" {
+  name                       = "st${var.name_prefix}qs${var.unique_suffix}"
+  resource_group_name        = var.resource_group_name
+  location                   = var.location
+  account_tier               = "Standard"
+  account_replication_type   = "LRS"
+  account_kind               = "StorageV2"
+  https_traffic_only_enabled = true
+  min_tls_version            = "TLS1_2"
+  tags                       = var.tags
+
+  static_website {
+    index_document     = "index.html"
+    error_404_document = "index.html"
+  }
+}
+
 # --- This app's OWN identity + pull rights on the SHARED registry ----------
 resource "azurerm_user_assigned_identity" "qs" {
   name                = "id-${var.name_prefix}-quicksignals"

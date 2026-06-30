@@ -135,6 +135,7 @@ module "quicksignals" {
   environment_default_domain   = module.app[0].environment_default_domain
   acr_login_server             = module.app[0].acr_login_server
   acr_id                       = module.app[0].acr_id
+  unique_suffix                = random_string.suffix.result
 
   image_tag         = var.quicksignals_image_tag
   image_pushed      = var.quicksignals_image_pushed
@@ -154,11 +155,35 @@ module "quicksignals" {
     LDAP_BIND_USER         = local.bind_account_dn
     LDAP_USER_SEARCH_BASES = "OU=${var.ou_name},${var.base_dn}"
     LDAP_ALLOWED_DOMAINS   = var.domain_realm
-  }, var.quicksignals_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {})
+    },
+    var.quicksignals_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {},
+    # Origin lock (Phase C): set once Front Door exists (two-phase). When present,
+    # the middleware 403s any request to the ACA FQDN lacking the matching FDID.
+    var.quicksignals_front_door_id != "" ? { FRONT_DOOR_ID = var.quicksignals_front_door_id } : {},
+  )
   ldap_bind_password = var.bind_account_password
 
   # Warm replica for an interactive dashboard; set 0 to scale-to-zero for the rig budget.
   min_replicas = 1
 
   depends_on = [module.app]
+}
+
+# Chunk 7 — Front Door (POC 1, Phase C). The shared public edge. Gated by
+# deploy_frontdoor; requires deploy_quicksignals=true. Consumes QuickSignals'
+# SPA storage host + ACA FQDN (module.quicksignals outputs that don't depend on
+# Front Door — no cycle). FRONT_DOOR_ID flows BACK to the app via the two-phase
+# var.quicksignals_front_door_id (apply FD, read its front_door_id, re-apply).
+module "frontdoor" {
+  source = "./modules/frontdoor"
+  count  = var.deploy_frontdoor ? 1 : 0
+
+  name_prefix         = var.name_prefix
+  tags                = local.tags
+  resource_group_name = module.app[0].rg_app_name
+
+  spa_web_host = module.quicksignals[0].spa_web_host
+  aca_fqdn     = module.quicksignals[0].app_fqdn
+
+  depends_on = [module.quicksignals]
 }

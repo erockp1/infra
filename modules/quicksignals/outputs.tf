@@ -16,3 +16,19 @@ output "fqdn" {
 output "url" {
   value = var.image_pushed ? "https://${azurerm_container_app.quicksignals[0].ingress[0].fqdn}" : null
 }
+
+# --- Phase C: SPA origin + the ACA origin host (for the Front Door module) ---
+output "app_fqdn" {
+  description = "The ACA ingress FQDN as a string (knowable without the resource) — Front Door's API origin host."
+  value       = local.app_fqdn
+}
+
+output "spa_web_host" {
+  description = "Static-website host of the SPA storage ($web) — Front Door's default (/*) origin host."
+  value       = azurerm_storage_account.spa.primary_web_host
+}
+
+output "spa_storage_account_name" {
+  description = "SPA storage account name (for `az storage blob upload-batch` to $web)."
+  value       = azurerm_storage_account.spa.name
+}

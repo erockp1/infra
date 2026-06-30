@@ -58,8 +58,13 @@ variable "django_secret_key" {
 
 variable "extra_env" {
   type        = map(string)
-  description = "Additional plain (non-secret) env vars for the container — e.g. the LDAP_* duality config and the rig-only AUTH_STUB_PERMISSIONS."
+  description = "Additional plain (non-secret) env vars for the container — e.g. the LDAP_* duality config, FRONT_DOOR_ID, and the rig-only AUTH_STUB_PERMISSIONS."
   default     = {}
+}
+
+variable "unique_suffix" {
+  type        = string
+  description = "Random suffix (shared with the rig) for the globally-unique SPA storage account name."
 }
 
 variable "ldap_bind_password" {

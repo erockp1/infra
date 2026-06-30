@@ -334,3 +334,16 @@ variable "quicksignals_stub_permissions" {
   description = "RIG-ONLY: set AUTH_STUB_PERMISSIONS=true so Phase B proves bind+duality+JWT without the AltopPermissions DB. MUST stay false for corporate."
   default     = false
 }
+
+# --- Front Door (Chunk 7, Phase C) — requires deploy_quicksignals=true -------
+variable "deploy_frontdoor" {
+  type        = bool
+  description = "Gate Chunk 7 (Front Door + WAF). DESTROY between sessions — Front Door has a base fee and no scale-to-zero."
+  default     = false
+}
+
+variable "quicksignals_front_door_id" {
+  type        = string
+  description = "Front Door resource_guid -> the app's FRONT_DOOR_ID (origin lock). Two-phase: empty on the FD-creating apply, then set to module.frontdoor's front_door_id output and re-apply."
+  default     = ""
+}
