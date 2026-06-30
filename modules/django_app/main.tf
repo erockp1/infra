@@ -1,21 +1,23 @@
 # ===========================================================================
-# Chunk 8 — BalDayDashboard (POC 1, Phase D), the second cloud-native app.
-#
-# Identical shape to the QuickSignals module (Chunk 6): reuses the SHARED
-# substrate (Container Apps env + ACR) but brings its OWN identity. This is the
-# "repeat the pattern" app; the natural next refactor is to fold both into one
-# parameterized module for the migrate-rest multiplier.
+# Generalized cloud-app module (POC 1). One definition of "a Django app on
+# Azure Container Apps", instantiated per app from the root. Replaces the
+# per-app copies. Each instance:
+#   - brings its OWN user-assigned identity (per-app AcrPull now, Key Vault later)
+#   - reuses the SHARED substrate (Container Apps env + ACR) from module "app"
+#   - serves its SPA from its own Blob static-website ($web)
+# All names derive from var.app_name / var.app_short so they exactly match the
+# pre-generalization per-app modules (proven by `moved` blocks + a zero-churn plan).
 # ===========================================================================
 
 locals {
-  app_name  = "ca-${var.name_prefix}-baldaydashboard"
-  image_ref = "${var.acr_login_server}/baldaydashboard:${var.image_tag}"
-  app_fqdn  = "${local.app_name}.${var.environment_default_domain}"
+  ca_name   = "ca-${var.name_prefix}-${var.app_name}"
+  image_ref = "${var.acr_login_server}/${var.app_name}:${var.image_tag}"
+  app_fqdn  = "${local.ca_name}.${var.environment_default_domain}"
 }
 
-# --- SPA static website (Phase C) -------------------------------------------
+# --- SPA static website -----------------------------------------------------
 resource "azurerm_storage_account" "spa" {
-  name                       = "st${var.name_prefix}bd${var.unique_suffix}"
+  name                       = "st${var.name_prefix}${var.app_short}${var.unique_suffix}"
   resource_group_name        = var.resource_group_name
   location                   = var.location
   account_tier               = "Standard"
@@ -31,25 +33,25 @@ resource "azurerm_storage_account" "spa" {
   }
 }
 
-# --- This app's OWN identity + pull rights on the SHARED registry ----------
-resource "azurerm_user_assigned_identity" "bd" {
-  name                = "id-${var.name_prefix}-baldaydashboard"
+# --- This app's OWN identity + pull rights on the SHARED registry -----------
+resource "azurerm_user_assigned_identity" "app" {
+  name                = "id-${var.name_prefix}-${var.app_name}"
   resource_group_name = var.resource_group_name
   location            = var.location
   tags                = var.tags
 }
 
-resource "azurerm_role_assignment" "bd_acr_pull" {
+resource "azurerm_role_assignment" "acr_pull" {
   scope                = var.acr_id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_user_assigned_identity.bd.principal_id
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
 }
 
-# --- The app (created only once its image is in ACR) -----------------------
-resource "azurerm_container_app" "baldaydashboard" {
+# --- The app (created only once its image is in ACR) ------------------------
+resource "azurerm_container_app" "app" {
   count = var.image_pushed ? 1 : 0
 
-  name                         = local.app_name
+  name                         = local.ca_name
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -58,12 +60,12 @@ resource "azurerm_container_app" "baldaydashboard" {
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.bd.id]
+    identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
   registry {
     server   = var.acr_login_server
-    identity = azurerm_user_assigned_identity.bd.id
+    identity = azurerm_user_assigned_identity.app.id
   }
 
   secret {
@@ -94,7 +96,7 @@ resource "azurerm_container_app" "baldaydashboard" {
     max_replicas = var.max_replicas
 
     container {
-      name   = "baldaydashboard"
+      name   = var.app_name
       image  = local.image_ref
       cpu    = var.cpu
       memory = var.memory
@@ -157,5 +159,5 @@ resource "azurerm_container_app" "baldaydashboard" {
     ignore_changes = [template[0].container[0].image]
   }
 
-  depends_on = [azurerm_role_assignment.bd_acr_pull]
+  depends_on = [azurerm_role_assignment.acr_pull]
 }

@@ -123,8 +123,11 @@ module "app" {
 # substrate (Container Apps env + ACR) but brings its OWN identity. Gated by
 # deploy_quicksignals; requires deploy_app=true (it consumes module.app[0]).
 module "quicksignals" {
-  source = "./modules/quicksignals"
+  source = "./modules/django_app"
   count  = var.deploy_quicksignals ? 1 : 0
+
+  app_name  = "quicksignals"
+  app_short = "qs"
 
   name_prefix = var.name_prefix
   location    = var.location
@@ -179,8 +182,11 @@ module "frontdoor" {
 # module shape as QuickSignals (Chunk 6), reusing the shared LDAP config. Gated
 # by deploy_baldaydashboard; requires deploy_app=true.
 module "baldaydashboard" {
-  source = "./modules/baldaydashboard"
+  source = "./modules/django_app"
   count  = var.deploy_baldaydashboard ? 1 : 0
+
+  app_name  = "baldaydashboard"
+  app_short = "bd"
 
   name_prefix = var.name_prefix
   location    = var.location

@@ -1,20 +1,20 @@
 output "identity_id" {
-  description = "BalDayDashboard's own user-assigned identity ID (for a future Key Vault grant)."
-  value       = azurerm_user_assigned_identity.bd.id
+  description = "This app's own user-assigned identity ID (for a future Key Vault grant)."
+  value       = azurerm_user_assigned_identity.app.id
 }
 
 output "identity_principal_id" {
   description = "Principal ID — scope Key Vault Secrets User to this when secrets move to Key Vault."
-  value       = azurerm_user_assigned_identity.bd.principal_id
+  value       = azurerm_user_assigned_identity.app.principal_id
 }
 
 output "fqdn" {
   description = "Public ingress FQDN (null until image_pushed)."
-  value       = var.image_pushed ? azurerm_container_app.baldaydashboard[0].ingress[0].fqdn : null
+  value       = var.image_pushed ? azurerm_container_app.app[0].ingress[0].fqdn : null
 }
 
 output "url" {
-  value = var.image_pushed ? "https://${azurerm_container_app.baldaydashboard[0].ingress[0].fqdn}" : null
+  value = var.image_pushed ? "https://${azurerm_container_app.app[0].ingress[0].fqdn}" : null
 }
 
 output "app_fqdn" {

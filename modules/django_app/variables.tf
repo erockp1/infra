@@ -1,3 +1,16 @@
+# Generalized cloud-app module (POC 1). One definition of "a Django app on ACA",
+# instantiated per app. Replaces the per-app copies (quicksignals, baldaydashboard).
+
+variable "app_name" {
+  type        = string
+  description = "App slug — drives the identity/container/image names (e.g. quicksignals, baldaydashboard)."
+}
+
+variable "app_short" {
+  type        = string
+  description = "Short token (<=4 chars) for the globally-unique SPA storage account name (e.g. qs, bd)."
+}
+
 variable "name_prefix" {
   type        = string
   description = "Short name prefix (shared with the rest of the rig)."
@@ -38,6 +51,11 @@ variable "acr_id" {
   description = "Shared ACR resource ID — the scope for this app's OWN AcrPull grant."
 }
 
+variable "unique_suffix" {
+  type        = string
+  description = "Random suffix (shared with the rig) for the globally-unique SPA storage account name."
+}
+
 variable "image_tag" {
   type        = string
   description = "Image tag for the first apply only; the CI pipeline owns it afterward (see ignore_changes)."
@@ -58,18 +76,13 @@ variable "django_secret_key" {
 
 variable "extra_env" {
   type        = map(string)
-  description = "Additional plain (non-secret) env vars for the container — e.g. the LDAP_* duality config, FRONT_DOOR_ID, and the rig-only AUTH_STUB_PERMISSIONS."
+  description = "Additional plain (non-secret) env vars — e.g. the LDAP_* duality config, FRONT_DOOR_ID, and the rig-only AUTH_STUB_PERMISSIONS."
   default     = {}
-}
-
-variable "unique_suffix" {
-  type        = string
-  description = "Random suffix (shared with the rig) for the globally-unique SPA storage account name."
 }
 
 variable "ldap_bind_password" {
   type        = string
-  description = "LDAP service/bind account password, injected as the secret env LDAP_BIND_PASSWORD. Null = omit (on-prem images bind by other means)."
+  description = "LDAP service/bind account password, injected as the secret env LDAP_BIND_PASSWORD. Null = omit."
   sensitive   = true
   default     = null
 }
@@ -82,7 +95,7 @@ variable "cpu" {
 
 variable "memory" {
   type        = string
-  description = "Memory — the sizing knob; QuickSignals is pandas-heavy."
+  description = "Memory — the sizing knob."
   default     = "2Gi"
 }
 
