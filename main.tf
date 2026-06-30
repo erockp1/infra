@@ -144,10 +144,10 @@ module "quicksignals" {
   image_pushed      = var.quicksignals_image_pushed
   django_secret_key = var.quicksignals_django_secret_key
 
-  # Duality (Phase B): the shared LDAP config (local.ldap_extra_env) + this app's
+  # Duality (Phase B): the shared LDAP config (local.cloud_app_env) + this app's
   # rig-only stub flag + its two-phase Front Door ID (origin lock).
   extra_env = merge(
-    local.ldap_extra_env,
+    local.cloud_app_env,
     var.quicksignals_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {},
     var.quicksignals_front_door_id != "" ? { FRONT_DOOR_ID = var.quicksignals_front_door_id } : {},
   )
@@ -216,7 +216,7 @@ module "baldaydashboard" {
   django_secret_key = var.baldaydashboard_django_secret_key
 
   extra_env = merge(
-    local.ldap_extra_env,
+    local.cloud_app_env,
     var.baldaydashboard_stub_permissions ? { AUTH_STUB_PERMISSIONS = "true" } : {},
     var.baldaydashboard_front_door_id != "" ? { FRONT_DOOR_ID = var.baldaydashboard_front_door_id } : {},
   )
