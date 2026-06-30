@@ -1,6 +1,11 @@
 # Chunk 0 cost guardrail: a low-threshold subscription budget. The day-one
 # backstop against a forgotten running VM. Alerts at 80% actual + 100% forecast.
 resource "azurerm_consumption_budget_subscription" "poc0" {
+  # Subscription-scoped singleton — gated off for the discovery harness (see
+  # var.manage_subscription_singletons). The `moved` block below keeps the rig
+  # state zero-churn through the count addition.
+  count = var.manage_subscription_singletons ? 1 : 0
+
   name            = "budget-${var.name_prefix}-poc0"
   subscription_id = "/subscriptions/${var.subscription_id}"
 
@@ -29,4 +34,9 @@ resource "azurerm_consumption_budget_subscription" "poc0" {
 
   # Budgets live under Microsoft.Consumption — make the RP registration explicit.
   depends_on = [azurerm_resource_provider_registration.consumption]
+}
+
+moved {
+  from = azurerm_consumption_budget_subscription.poc0
+  to   = azurerm_consumption_budget_subscription.poc0[0]
 }

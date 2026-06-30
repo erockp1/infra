@@ -1,0 +1,45 @@
+# tfvars for the permission-discovery harness. Copy to disco.tfvars (git-ignored)
+# and fill in subscription_id / tenant_id.
+#
+#   cp disco/disco.tfvars.example disco/disco.tfvars
+#
+# First-pass scope: network + substrate + ONE app (quicksignals), no images pushed.
+# That covers ~80% of the corporate role surface fast. DC + Front Door + the second
+# app are added in later passes by flipping the gates below.
+
+subscription_id = "<subscription_id_guid>"
+tenant_id       = "<tenant_id_guid>"
+
+# Sandbox naming: drives rg-disco-net / rg-disco-app and all resource names.
+name_prefix  = "disco"
+location     = "eastus"
+delete_after = ""
+
+# --- The two flags that make this a discovery sandbox ----------------------
+# Mirror corporate: the RGs are handed to you (pre-created by Owner in 00-prep.sh),
+# so reference them as data sources rather than creating them. A principal that
+# can't READ an RG gets a 404 that looks like not-found — 00-prep.sh grants the SP
+# Reader on both RGs so every loop failure is an unambiguous AuthorizationFailed.
+create_resource_groups = false
+
+# Drop the subscription-scoped singletons (RP registrations + budget): in this same
+# sub they're already done, so they'd no-op and never surface their perms. Their
+# required actions are documented separately in discovered-roles.md.
+manage_subscription_singletons = false
+
+# --- First-pass chunk gates ------------------------------------------------
+deploy_dc              = false  # no DC: keeps the pass to net + app surface
+deploy_app             = true   # substrate: Log Analytics, ACR, identity, AcrPull, ACA env
+deploy_quicksignals    = true   # one app: its identity + AcrPull (the roleAssignments/write finding)
+deploy_baldaydashboard = false
+deploy_frontdoor       = false
+
+# Two-phase image gates OFF: the container_app resources stay count=0, so no image
+# push is needed. The identities, storage account, and — crucially — both AcrPull
+# role assignments are still created, so Microsoft.Authorization/roleAssignments/write
+# surfaces in the loop without any image.
+app_image_pushed          = false
+quicksignals_image_pushed = false
+
+# django_secret_key is unused while quicksignals_image_pushed = false (it only feeds
+# the count=0 container app), so it's intentionally left unset (null).

@@ -81,6 +81,21 @@ variable "rg_app_name" {
   default     = null
 }
 
+# --- Subscription-scoped singletons gate (porting / discovery affordance) --
+# The RP registrations (providers.tf) and the consumption budget (budget.tf) are
+# the only SUBSCRIPTION-scoped resources. In a sub where the RPs are already
+# registered and a budget exists, they are no-ops that never surface their
+# permission requirement — invisible to the permission-discovery harness (and a
+# likely DENY in the corporate sub, where security pre-registers RPs and withholds
+# the registration action). Set false to drop them from the plan entirely: for the
+# disco harness (same sub, already registered) and for a corporate apply where
+# those actions are out of scope. Default true keeps the rig's behavior identical.
+variable "manage_subscription_singletons" {
+  type        = bool
+  description = "true (rig): manage the subscription-scoped RP registrations + budget. false (disco harness / corporate where these are pre-done or denied): drop them from the plan."
+  default     = true
+}
+
 # --- Budget / cost guardrail (Chunk 0) -------------------------------------
 variable "budget_alert_email" {
   type        = string

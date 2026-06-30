@@ -28,8 +28,8 @@ output "bind_account_dn" {
 }
 
 output "budget_name" {
-  description = "Subscription budget guardrail."
-  value       = azurerm_consumption_budget_subscription.poc0.name
+  description = "Subscription budget guardrail (null when manage_subscription_singletons=false)."
+  value       = var.manage_subscription_singletons ? azurerm_consumption_budget_subscription.poc0[0].name : null
 }
 
 # --- Chunk 1: network ------------------------------------------------------

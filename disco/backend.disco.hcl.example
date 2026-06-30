@@ -1,0 +1,13 @@
+# Backend config for the permission-discovery harness. Copy to backend.disco.hcl
+# (git-ignored) and fill in the concrete storage account name.
+#
+#   cp disco/backend.disco.hcl.example disco/backend.disco.hcl
+#
+# Same state account/container as the rig (get the values from
+# `terraform -chdir=bootstrap output backend_hcl`), but a DIFFERENT key so the
+# harness state can never reconcile against the rig's poc0.tfstate.
+resource_group_name  = "rg-altop-tfstate"
+storage_account_name = "<storage_account_name>"  # e.g. altoptfn95qtf — from bootstrap output
+container_name       = "tfstate"
+key                  = "disco.tfstate"
+use_azuread_auth     = true
